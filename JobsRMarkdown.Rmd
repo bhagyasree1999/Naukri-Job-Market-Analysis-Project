@@ -1,0 +1,398 @@
+---
+title: "Analysis of Job Listings on Naukri.com"
+author: "Bhagya Sree"
+date: "2024-04-30"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+always_allow_html: true
+---
+#### BIS581 Final Project
+#### Prof. Vishal Shah
+
+### Introduction
+
+The "Naukri.com Job Listings Dataset" comprises a comprehensive collection of job advertisements posted on Naukri.com, one of India's largest job search portals. This dataset provides a detailed snapshot of the current job market in India, capturing a variety of attributes across diverse job listings. It serves as a valuable resource for analyzing trends in job requirements, employer preferences, and the evolving landscape of employment opportunities across various sectors.
+
+
+### Dataset Description
+
+The `naukri.csv` file contains multiple columns providing a comprehensive look at each job listing. Key columns include:
+
+- **Job Title:** The title of the job posting.
+- **Company Name:** The name of the company listing the job.
+- **Experience Required:** The experience needed for the job.
+- **Location:** The location where the job is based.
+- **Skills Required:** Key skills needed for the job.
+- **Salary:** The salary offered for the position.
+- **StarRating:** Ratings of the Company
+- **ReviewCount:** No. of reviews
+
+### Load the libraries
+```{r}
+# Install the required packages
+if (!require("caret")) install.packages("caret", dependencies = TRUE)
+if (!require("rpart")) install.packages("rpart", dependencies = TRUE)
+library(tidyverse) # For data manipilation and Visualization
+library(dplyr) # Used to perform data operations
+library(ggplot2) # Used for creating graphs
+library(tidytext) # For text mining and analysis of textual data
+library(plotly) # For creating interactive plots and visualizations
+library(readr)  # For efficient data reading and parsing
+library(caret)   # For modeling and data partitioning
+library(rpart)   # For decision tree models
+library(corrplot) # For visualizing correlation matrices
+library(scales)  # For formatting scales
+
+```
+
+### Step1: Data Loading
+
+Let's start by loading the dataset and performing some initial explorations to understand the structure and content of our data.
+
+```{r}
+# Setting the correct path for the dataset
+filepath <- "C:/r-workshop/data/raw/naukri.csv"
+
+# Loading the dataset
+Jobs <- read_csv(filepath)
+```
+### Step2: Data Inspection
+
+Data Inspection is used to understand the structure and content of the Jobs data set. It includes commands to view the data, print information, and check its dimensions and structure.
+```{r}
+# Initial data inspection
+view(Jobs) # Used to view the dataset
+glimpse (Jobs) # Gives the concise overview of the dataset
+
+```
+```{r}
+nrow(Jobs) # Gives the No.OfRows in the dataset
+ncol(Jobs) # Gives the No.OfColumns in the dataset
+```
+```{r}
+str(Jobs) # Gives the detailed structure of the dataset
+```
+### Step3: Data Cleaning
+
+Data cleaning is an essential step in data analysis that involves correcting or removing inaccurate, corrupted, or incomplete data from a dataset.
+
+```{r}
+# All the columns in the dataset are assigned to new_column_names
+new_column_names <- c("JobTitle",
+                      "JobTitleLink",
+                      "Company",
+                      "CompanyLink",
+                      "RatingLink",
+                      "CompanyRating",
+                      "No.ofReviews",
+                      "YearsOfExperience",
+                      "LPA",
+                      "JobDescription",
+                      "Requirement1",
+                      "Requirement2",
+                      "Requirement3",
+                      "Requirement4",
+                      "Requirement5",
+                      "Requirement6",
+                      "Requirement7",
+                      "Requirement8",
+                      "Requirement9")
+
+# Assign the new column names to the dataset
+colnames(Jobs) <- new_column_names
+
+```
+Using view command to make sure whether the column names have been changed or not.
+```{r}
+view(Jobs)
+```
+
+```{r}
+# Remove the rows with any missing values.
+Jobs <- na.omit(Jobs)
+
+# Removes duplicate entries.
+Jobs <- Jobs %>% distinct()
+
+```
+
+Converting a factor to character if it's been incorrectly read
+```{r}
+Jobs$JobTitle <- as.character(Jobs$JobTitle)
+Jobs$CompanyRating <- as.numeric(Jobs$CompanyRating) 
+#Company rating is coverted in to numeric datatype.
+```
+
+Combining few columns that is Requirement 1 to Requirement 9 into 1 requirement by using unite function because all of comes under the skills required.
+```{r}
+# Combine "Requirement1" to "Requirement9" into one column
+Jobs <- Jobs %>%
+  unite("Requirements", c(Requirement1,
+                          Requirement2,
+                          Requirement3,
+                          Requirement4,
+                          Requirement5,
+                          Requirement6,
+                          Requirement7,
+                          Requirement8,
+                          Requirement9),
+        sep = ", ", na.rm = TRUE, remove = TRUE)
+
+```
+
+Job Title Link is not necessary according to my analysis and I will remove this column from the Jobs dataset
+```{r}
+Jobs <- Jobs %>%
+  select(-JobTitleLink)
+```
+
+Converted the no.of reviews column into a numeric datatype to do further analysis with the data.
+```{r}
+# Extract the numerical part from the "No.ofReviews" column
+Jobs <- Jobs %>% 
+  mutate(No.ofReviews = parse_number(No.ofReviews))
+
+#Converting character to numeric
+Jobs$No.ofReviews <- as.numeric(Jobs$No.ofReviews)
+```
+
+```{r}
+# Extract just the numeric part of the range and keep it as a string
+Jobs <- Jobs %>%
+  mutate(YearsOfExperience = str_extract(YearsOfExperience, "\\d+-\\d+"))
+```
+
+Company_information object is created and only the required columns are taken from the jobs dataset to perform data visualization.
+```{r}
+# Selecting required columns that are required for visualizing the data.
+Company_information <- Jobs %>%
+  select(Company, 
+         CompanyRating,
+         No.ofReviews,
+         JobTitle) %>%
+  mutate(
+    # Clean non-numeric characters from reviews
+    No.ofReviews = as.numeric(gsub("\\D", "", No.ofReviews)), 
+    
+    # Standardize company names
+    Company = tolower(Company), 
+    
+    # Ensure numeric ratings
+    CompanyRating = as.numeric(CompanyRating), 
+    
+    # Standardize job titles
+    JobTitle = tolower(JobTitle) 
+  ) %>%
+  na.omit() %>%  # Handle missing values
+  distinct()
+```
+
+Used to manage rare categorical levels in the dataset, particularly within the Company and JobTitle columns of the Company_information dataframe. This is crucial for data cleaning and pre-processing to ensure that the data is well-structured for data analysis.
+```{r}
+# Handle rare factors by grouping them into 'Other'
+count_companies <- table(Company_information$Company)
+count_titles <- table(Company_information$JobTitle)
+```
+
+The threshold value that determines a "rare" category. Any company name or job title appearing less than 5 times is considered as rare.
+```{r}
+# Threshold for considering a factor level rare
+threshold <- 5
+```
+
+Ifelse replaces names of companies and job titles that appear fewer than 5 times (as per the set threshold) with 'Other'. This helps in reducing the number of levels in these categorical variables, which can be particularly beneficial when preparing data for machine learning models.
+```{r}
+# Grouping the rare categories and job titles into 'Other'
+Company_information$Company <- 
+  ifelse(count_companies[Company_information$Company] 
+         < threshold, 'Other', Company_information$Company)
+Company_information$JobTitle <- 
+  ifelse(count_titles[Company_information$JobTitle] 
+         < threshold, 'Other', Company_information$JobTitle)
+```
+
+This ensure that these columns are treated as categorical variables in modeling processes. The factor conversion reaffirms the status as categorical data with a defined set of levels.
+```{r}
+# Refactorize to ensure consistency
+Company_information$Company <- factor(Company_information$Company)
+Company_information$JobTitle <- factor(Company_information$JobTitle)
+```
+
+### Step4: Data Visualization
+The histogram is used to visualize the distribution of company ratings using the ggplot2 package.
+```{r}
+# Histogram of distribution of company ratings
+rating_dist <- ggplot(Company_information, aes(x = CompanyRating)) +
+  geom_histogram(binwidth = 0.5, fill = "#0073C2FF", color = "black") + 
+  # Format x-axis labels
+  scale_x_continuous(breaks = pretty_breaks(n = 10), limits = c(0, 5)) +
+  # Format y-axis labels
+  scale_y_continuous(labels = comma) +
+  labs(title = "Distribution of Company Ratings", 
+       subtitle = "Histogram showing the frequency distribution of company ratings",
+       x = "Rating", 
+       y = "Frequency") +
+  theme_minimal() +  # Clean and minimal theme
+  theme(
+    plot.title = element_text(face = "bold", size = 14),  # Bold and larger title
+    plot.subtitle = element_text(size = 12),  # Subtitle
+    axis.title = element_text(size = 12),  # Axis titles
+    axis.text = element_text(size = 10),  # Axis text
+    panel.grid.major = element_line(color = "gray80"),  # Lighter grid lines
+    panel.grid.minor = element_blank(),  # No minor grid lines
+    legend.position = "none"  # Remove legend if not necessary
+  )
+
+print(rating_dist)
+```
+
+To get the bar chart of top 10 companies by average ratings we need to aggregate data to compute average ratings, followed by plotting these averages.
+```{r}
+# Assuming 'Company_information' has columns 'Company' and 'avg_rating'
+aggregated_data <- Company_information %>% 
+  group_by(Company) %>% 
+  summarize(avg_rating = mean(CompanyRating, na.rm = TRUE))
+
+# Select the top 10 companies based on average rating
+top_companies <- head(aggregated_data, 10)
+
+Company_Avg_Rating <- ggplot(top_companies, 
+            aes(x = reorder(Company,
+                            avg_rating), 
+                y = avg_rating)) +
+  geom_bar(stat = "identity", 
+           fill = "skyblue") +
+  labs(title = "Top 10 Companies by Average Rating",
+       x = "Company",
+       y = "Average Rating") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggplotly(Company_Avg_Rating)
+```
+
+Scatter plot is used to visually explore the relationship between the total number of reviews and company ratings. 
+```{r}
+# Scatter plot of total reviews vs. company rating
+reviews_vs_rating <- ggplot(Company_information, 
+                              aes(x = CompanyRating, 
+                                  y = No.ofReviews)) +
+  geom_point() +
+  labs(title = "Total Reviews vs. Company Rating",
+       x = "Company Rating", 
+       y = "Total Reviews")
+
+print(reviews_vs_rating)
+```
+
+
+```{r}
+top_companies_reviews <- Company_information %>%
+  group_by(Company) %>%
+  summarize(TotalReviews = sum(No.ofReviews, na.rm = TRUE)) %>%
+  arrange(desc(TotalReviews)) %>%
+  slice_head(n = 10)  # Select the top 10 companies with the most reviews
+
+# Plotting the top 10 companies by total reviews
+ggplot(top_companies_reviews, aes(x = reorder(Company, TotalReviews), 
+                                  y = TotalReviews, fill = Company)) +
+  geom_col() +  # or geom_bar(stat = "identity") depending on your preference
+  labs(title = "Top 10 Companies by Total Reviews", 
+       x = "Company", 
+       y = "Total Reviews") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+```
+
+The below boxplot visualizes how company ratings distribute across different review volume groups categorized as "Very Low", "Low", "Medium", and "High". The geom_boxplot() function used to understand the relationship between the volume of reviews and company ratings.
+```{r}
+
+# Review counts are categorized into groups
+Company_information$ReviewGroup <- cut(Company_information$No.ofReviews,
+                                       breaks = quantile(Company_information$No.ofReviews, 
+          probs = 0:4 / 4, na.rm = TRUE),
+          include.lowest = TRUE,
+          labels = c("Very Low", "Low","Medium", "High"))
+
+# Boxplot of Company Ratings by Review Groups
+boxplot_rating_reviews <- ggplot(Company_information, aes(x = ReviewGroup, 
+                          y = CompanyRating)) + 
+  geom_boxplot(aes(fill = ReviewGroup)) +
+  labs(title = "Boxplot of Company Ratings by Review Group",
+       x = "Review Group",
+       y = "Company Rating") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(boxplot_rating_reviews)
+```
+
+### Step5: Data Modeling
+## Decision Trees
+
+- This code demonstrates how to split a dataset into training and testing sets using the createDataPartition() function from the caret package, crucial for training and evaluating machine learning models. 
+
+   - Setting a seed ensures reproducibility, allowing consistent results across runs. 
+
+   - The function splits the data by arranging it based on CompanyRating, maintaining the distribution across sets, typically using 80% of the data for training and 20% for testing. 
+
+```{r}
+# Split the data into training and testing sets
+set.seed(123)  # for reproducibility
+training_rows <- createDataPartition(Company_information$CompanyRating,
+                                     p = 0.8, 
+                                     list = FALSE)
+training_data <- Company_information[training_rows, ]
+testing_data <- Company_information[-training_rows, ]
+```
+
+This code fits a decision tree model to the training_data using the rpart function with ANOVA method to predict CompanyRating, and then summarizes the model's structure and performance metrics.
+```{r}
+# Fit a decision tree model
+model_tree <- rpart(CompanyRating ~ ., data = training_data, method = "anova")
+summary(model_tree)
+```
+
+This code generates predictions using the decision tree model on the testing data, constructs a dataframe comparing actual to predicted company ratings, and displays the first few rows.
+```{r}
+# Predict and evaluate the model
+predictions <- predict(model_tree, newdata = testing_data)
+result <- data.frame(Actual = testing_data$CompanyRating, 
+                     Predicted = predictions)
+
+# Display the first six rows of the result dataframe to preview the actual vs predicted values
+head(result)
+```
+
+Here I am calculating the Root Mean Square Error (RMSE) of the decision tree model to quantify the prediction error and print the result.
+```{r}
+# Calculating RMSE
+rmse <- sqrt(mean((result$Actual - result$Predicted)^2))
+print(paste("Root Mean Square Error:", rmse))
+```
+
+## Linear Regression
+Creating and evaluating a linear regression model to predict company ratings based on other variables within the dataset
+```{r}
+# Fit a linear regression model
+linear_model <- lm(CompanyRating ~ ., data = training_data)
+summary(linear_model)
+
+```
+
+Prediction of company ratings is done by using a linear regression model and data frame is created by comparing actual ratings from the test data with the predicted values, displaying the first few rows for review.
+```{r}
+# Predict and evaluate the linear regression model
+linear_predictions <- predict(linear_model, newdata = testing_data)
+linear_result <- data.frame(Actual = testing_data$CompanyRating, 
+                            Predicted = linear_predictions)
+head(linear_result)
+
+```
+
+Here I am calculating the Root Mean Square Error (RMSE) of the linear regression model to quantify the prediction error and print the result.
+```{r}
+# Calculate RMSE for the linear regression model
+linear_rmse <- sqrt(mean((linear_result$Actual - linear_result$Predicted)^2))
+print(paste("Root Mean Square Error for Linear Regression:", linear_rmse))
+```
